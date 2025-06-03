@@ -44,7 +44,11 @@ def load_position():
     if os.path.exists(get_position_file()):
         with open(get_position_file(), "r") as f:
             data = json.load(f)
-            return data.get("x", 0), data.get("y", 0)
+            x = data.get("x", 0)
+            y = data.get("y", 0)
+            if x < 0 or y < 0:
+                return 0, 0
+            return x, y
     return 0, 0
 
 cat_sheet = resource_path("cat_sprite_sheet.png")
