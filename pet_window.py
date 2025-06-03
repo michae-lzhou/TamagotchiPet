@@ -139,8 +139,7 @@ class FloatingPet(QLabel):
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.WindowStaysOnTopHint
         )
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -230,6 +229,7 @@ class FloatingPet(QLabel):
             )
             self.setPixmap(scaled_pixmap)
             self.resize(scaled_pixmap.size())
+            self.setFixedSize(scaled_pixmap.size())
 
     # complete_animation: after each cycle of animation, check whether or not
     # we've reached the desired number to refresh to a new animation in the same
