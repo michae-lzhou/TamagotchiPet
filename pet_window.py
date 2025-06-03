@@ -58,6 +58,12 @@ cat_keys = ["idle", "idle", "idle", "idle", "active", "active",
         "lazy", "interact", "interact", "lazy"]
 cat_scale = 2
 
+# Create a 1x1 fully transparent QPixmap
+def transparent_pixmap():
+    image = QImage(1, 1, QImage.Format.Format_ARGB32)
+    image.fill(0)  # 0 = fully transparent
+    return QPixmap.fromImage(image)
+
 # bbox: loads in a sprite frame and finds the max/min of both x and y, if the
 # boolean returned is true, that means the current frame is fully transparent
 def bbox(pixmap: QPixmap):
@@ -196,6 +202,8 @@ class FloatingPet(QLabel):
         self.timer = QTimer()
         self.timer.timeout.connect(self.next_frame)
         self.timer.start(100)
+
+        self.setPixmap(transparent_pixmap())
         self.show()
 
     # refresh_animation: only called to re-pick which animation to do for the
@@ -231,6 +239,7 @@ class FloatingPet(QLabel):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
+            self.clear()
             self.setPixmap(scaled_pixmap)
             self.resize(scaled_pixmap.size())
             self.setFixedSize(scaled_pixmap.size())
