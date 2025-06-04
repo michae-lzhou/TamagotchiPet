@@ -37,9 +37,9 @@ from pathlib import Path
 # persistent settings across sessions (position, scale, etc.)
 def get_config_file():
     if sys.platform == "win32":
-        config_dir = Path(os.getenv("APPDATA")) / "FloatingPet"
+        config_dir = Path(os.getenv("APPDATA")) / "TamagotchiPet"
     else:
-        config_dir = Path.home() / ".config" / "FloatingPet"
+        config_dir = Path.home() / ".config" / "TamagotchiPet"
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir / "config.json"
 
