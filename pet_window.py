@@ -9,15 +9,39 @@ from PyQt6.QtCore import Qt, QTimer
 from pyautostart import SmartAutostart
 from pathlib import Path
 
-# get_position_file: reads and writes from a user-specific config file to have
-# persistent position across sessions
-def get_position_file():
+# ###############################################################################
+# # This block of code gently suppresses the initial warning if my keyboard or
+# # mouse activates an event before it is supposed to
+# 
+# import warnings
+# import threading
+# import sys
+# 
+# # Suppress specific threading warnings on macOS
+# warnings.filterwarnings("ignore", category=RuntimeWarning, module="threading")
+# 
+# # Optional: Redirect stderr temporarily during listener initialization
+# class SuppressStderr:
+#     def __enter__(self):
+#         self._original_stderr = sys.stderr
+#         sys.stderr = open(os.devnull, 'w')
+#         return self
+# 
+#     def __exit__(self, exc_type, exc_val, exc_tb):
+#         sys.stderr.close()
+#         sys.stderr = self._original_stderr
+# 
+# ###############################################################################
+
+# get_config_file: reads and writes from a user-specific config file to have
+# persistent settings across sessions (position, scale, etc.)
+def get_config_file():
     if sys.platform == "win32":
         config_dir = Path(os.getenv("APPDATA")) / "FloatingPet"
     else:
         config_dir = Path.home() / ".config" / "FloatingPet"
     config_dir.mkdir(parents=True, exist_ok=True)
-    return config_dir / "position.json"
+    return config_dir / "config.json"
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and PyInstaller """
@@ -34,22 +58,51 @@ A_KPM = 200         # 200 key presses per minute (upper threshold)
 L_KPM = 50          # 50 key presses per minute (lower threshold)
 L_MPM = 250         # 250 mouse movements per minute (lower threshold)
 
-# save_position: saves the position of the window to load up next time
-def save_position(pos):
-    with open(get_position_file(), "w") as f:
-        json.dump({"x": pos.x(), "y": pos.y()}, f)
+# save_config: saves all configuration settings (position, scale, etc.)
+def save_config(pos=None, scale=None):
+    config = {}
+    
+    # Load existing config if file exists
+    if os.path.exists(get_config_file()):
+        try:
+            with open(get_config_file(), "r") as f:
+                config = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            config = {}
+    
+    # Update with new values if provided
+    if pos is not None:
+        config["x"] = pos.x()
+        config["y"] = pos.y()
+    if scale is not None:
+        config["scale"] = scale
+    
+    # Save updated config
+    with open(get_config_file(), "w") as f:
+        json.dump(config, f)
 
-# load_position: loads the previously saved position of the window
-def load_position():
-    if os.path.exists(get_position_file()):
-        with open(get_position_file(), "r") as f:
-            data = json.load(f)
-            x = data.get("x", 0)
-            y = data.get("y", 0)
-            if x < 0 or y < 0:
-                return 0, 0
-            return x, y
-    return 0, 0
+# load_config: loads all configuration settings
+def load_config():
+    if os.path.exists(get_config_file()):
+        try:
+            with open(get_config_file(), "r") as f:
+                data = json.load(f)
+                
+                # Load position
+                x = data.get("x", 0)
+                y = data.get("y", 0)
+                if x < 0 or y < 0:
+                    x, y = 0, 0
+                
+                # Load scale
+                scale = data.get("scale", 2.0)
+                scale = max(0.5, min(5.0, scale))  # Clamp scale between reasonable bounds
+                
+                return x, y, scale
+        except (json.JSONDecodeError, IOError):
+            pass
+    
+    return 0, 0, 2.0  # default values
 
 cat_sheet = resource_path("cat_sprite_sheet.png")
 cat_frames = 8
@@ -62,7 +115,8 @@ cat_scale = 2
 def transparent_pixmap():
     image = QImage(1, 1, QImage.Format.Format_ARGB32)
     image.fill(0)  # 0 = fully transparent
-    return QPixmap.fromImage(image)
+    pixmap = QPixmap.fromImage(image)
+    return pixmap
 
 # bbox: loads in a sprite frame and finds the max/min of both x and y, if the
 # boolean returned is true, that means the current frame is fully transparent
@@ -156,7 +210,8 @@ class FloatingPet(QLabel):
         self.pet_sprites = pet_sprites
         self.scale = scale
         self.drag_pos = None
-        x, y = load_position()
+        x, y, _ = load_config()  # Load position from config, ignore scale since it's passed as parameter
+
         self.move(x, y)
 
         #######################################################################
@@ -196,14 +251,14 @@ class FloatingPet(QLabel):
         self.prev_state = "lazy"
         self.refresh_animation(curr_state="lazy")
         self.frame_index = 0
-        self.update_pixmap()
+        
+        self.setPixmap(transparent_pixmap())
 
         # set up QTimer to cycle the frames
         self.timer = QTimer()
         self.timer.timeout.connect(self.next_frame)
         self.timer.start(100)
 
-        self.setPixmap(transparent_pixmap())
         self.show()
 
     # refresh_animation: only called to re-pick which animation to do for the
@@ -234,8 +289,8 @@ class FloatingPet(QLabel):
         if frames:
             pixmap = QPixmap(frames[self.frame_index])
             scaled_pixmap = pixmap.scaled(
-                pixmap.width() * self.scale,
-                pixmap.height() * self.scale,
+                int(pixmap.width() * self.scale),
+                int(pixmap.height() * self.scale),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation
             )
@@ -287,6 +342,25 @@ class FloatingPet(QLabel):
     def interactEvent(self):
         self.refresh_animation(curr_state = "interact")
 
+    def wheelEvent(self, event):
+        """Handle mouse wheel scrolling to adjust scale"""
+        # Get the scroll delta (positive for up, negative for down)
+        delta = event.angleDelta().y()
+        
+        # Adjust scale based on scroll direction
+        scale_change = 0.1 if delta > 0 else -0.1
+        new_scale = self.scale + scale_change
+        
+        # Clamp scale between reasonable bounds (0.5x to 5.0x)
+        new_scale = max(0.5, min(5.0, new_scale))
+        
+        if new_scale != self.scale:
+            self.scale = new_scale
+            self.update_pixmap()
+            save_config(scale=self.scale)
+        
+        event.accept()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -298,13 +372,27 @@ class FloatingPet(QLabel):
 
     def mouseMoveEvent(self, event):
         if self._drag_pos is not None and event.buttons() & Qt.MouseButton.LeftButton:
-            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            # Calculate the new position
+            new_pos = event.globalPosition().toPoint() - self._drag_pos
+            
+            # Get screen geometry
+            screen = QApplication.primaryScreen().geometry()
+            
+            # Get widget size
+            widget_size = self.size()
+            
+            # Constrain position to screen boundaries
+            x = max(0, min(new_pos.x(), screen.width() - widget_size.width()))
+            y = max(0, min(new_pos.y(), screen.height() - widget_size.height()))
+            
+            # Move to constrained position
+            self.move(x, y)
             event.accept()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = None
-            save_position(self.pos())
+            save_config(pos=self.pos())
             event.accept()
 
     def quit(self):
@@ -326,17 +414,22 @@ if __name__ == "__main__":
         autostart = SmartAutostart()
         options = {
             "args": [
-                os.path.abspath(file)
+                os.path.abspath(__file__)  # Fixed: was using undefined 'file' variable
             ]
         }
         autostart.enable(name="TamagotchiPet", options=options)
+
     except Exception as e:
         pass
 
     try:
         app = QApplication(sys.argv)
         cat_sprites = load_sprites(cat_sheet, cat_frames, cat_counts, cat_keys)
-        pet = FloatingPet(scale=cat_scale, pet_sprites=cat_sprites)
+        
+        # Load saved position and scale from config
+        x, y, saved_scale = load_config()
+        pet = FloatingPet(scale=saved_scale, pet_sprites=cat_sprites)
+
         keyboard_listener, mouse_listener = listeners.start_listeners()
     except KeyboardInterrupt:
         quit_app()
